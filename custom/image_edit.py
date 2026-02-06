@@ -121,7 +121,7 @@ def generate_final(prompt, person_url, hourse_url):
             if choices and "message" in choices[0] and "content" in choices[0]["message"]:
                 content = choices[0]["message"]["content"]
                 # 提取所有 type 为 image 的项的 image 字段
-                image_urls = [item["image"] for item in content if item.get("type") == "image"]
+                image_urls = [item["image"] for item in content if "image" in item]
                 if image_urls:
                     return image_urls
         

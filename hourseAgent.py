@@ -17,6 +17,8 @@ from typing import List
 from dotenv import load_dotenv
 from custom.request import generate_image_by_text
 from custom.image_edit import image_style_change, generate_final
+from langgraph.checkpoint.memory import InMemorySaver
+from langchain_core.runnables import RunnableConfig
 load_dotenv()
 
 system_prompt = """你是一个优秀的艺术设计专家, 同时也擅长提示词工程。"""
@@ -24,8 +26,7 @@ system_prompt = """你是一个优秀的艺术设计专家, 同时也擅长提�
 llm = ChatOpenAI(
     model="qwen3-max-2026-01-23",
     api_key=os.getenv("DASHSCOPE_API_KEY", None),
-    base_url="https://dashscope.aliyuncs.com/compatible-mode/v1",
-    system_prompt=system_prompt
+    base_url="https://dashscope.aliyuncs.com/compatible-mode/v1"
 )
 
 class ImageStyles(BaseModel):
@@ -47,14 +48,40 @@ class MessageState(TypedDict):
     final_image: str
     styles: List[str]
     style: str
+    waiting_human_select_style: bool
+    # thread_id: int
 
+config: RunnableConfig = {"configurable": {"thread_id": "1"}}
 # Define nodes
 def style_generate(state: MessageState):
     """生成随机的风格名称"""
-    structured_llm.invoke({"messages": [
+    from langchain_core.messages import SystemMessage
+    result = structured_llm.invoke([
+        SystemMessage(content=system_prompt),
         HumanMessage(content="请生成4种随机的图片风格名称, 风格名字不要重复")
-    ]})
-    return {"styles": structured_llm(state["messages"])}
+    ])
+    return {
+        "styles": result.styles,
+        "waiting_human_select_style": True  # 设置等待用户选择
+    }
+
+# 修改 style_select 节点
+def style_select(state: MessageState):
+    """等待用户选择风格（此节点会暂停执行）"""
+    from langgraph.types import interrupt
+    
+    # 使用 interrupt 暂停执行，并返回风格列表给用户
+    selected_style = interrupt({
+        "type": "style_selection",
+        "styles": state["styles"],
+        "message": "请从以下风格中选择一个："
+    })
+    
+    # 用户恢复执行后，selected_style 会包含用户的选择
+    return {
+        "style": selected_style,
+        "waiting_human_select_style": False
+    }
 
 def hourse_generate(state: MessageState):
     """生成带有指定风格的马的图片"""
@@ -71,9 +98,12 @@ def hourse_generate(state: MessageState):
 
 def person_generate(state: MessageState):
     """转换照片中的人物为指定风格"""
-    image_url = state['person']  # Use the person image URL from the state
+    # image_url = state['person']  # Use the person image URL from the state
 
-    image_urls = image_style_change(state['style'], image_url)
+    # image_urls = image_style_change(state['style'], image_url)
+    # 先用生图替代风格转换
+    prompt = f"请生成一张符合以下风格的人物图片: {state['style']}"
+    image_urls = generate_image_by_text(prompt)
     if image_urls:
         print("人物图片转换成功，URL列表：")
         for idx, url in enumerate(image_urls, 1):
@@ -96,18 +126,30 @@ def image_generate(state: MessageState):
 
 agent_builder = StateGraph(MessageState)
 agent_builder.add_node("style_generate", style_generate)
+agent_builder.add_node("style_select", style_select)
 agent_builder.add_node("hourse_generate", hourse_generate)
 agent_builder.add_node("person_generate", person_generate)
 agent_builder.add_node("image_generate", image_generate)
 
+agent_builder.set_entry_point("style_generate")
+# 条件路由：生成风格后，进入选择节点
+agent_builder.add_edge(
+    "style_generate",
+    "style_select"
+)
+agent_builder.add_edge("style_select", "person_generate")
+agent_builder.add_edge("person_generate", "hourse_generate")
+# agent_builder.add_edge("person_generate", "image_generate")
+agent_builder.add_edge("hourse_generate", "image_generate")
+agent_builder.add_edge("image_generate", END)
 
 
-
+checkpointer = InMemorySaver()
+agent = agent_builder.compile(checkpointer=checkpointer)
 # Compile the agent
-agent = agent_builder.compile()
 # Invoke the agent
-messages = [HumanMessage(content=[
-    {type: "text", "text": ""},
-    {type: "image_url", "image_url": "https://example.com/horse.jpg"}
-])]
-messages = agent.invoke({"messages": messages})
+# messages = [HumanMessage(content=[
+#     {type: "text", "text": ""},
+#     {type: "image_url", "image_url": "https://example.com/horse.jpg"}
+# ])]
+# messages = agent.invoke({"messages": messages}, config=config)
