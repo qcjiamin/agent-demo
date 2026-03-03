@@ -139,6 +139,7 @@ agent_builder.add_edge(
 )
 agent_builder.add_edge("style_select", "person_generate")
 agent_builder.add_edge("person_generate", "hourse_generate")
+# 模型不支持并行，暂时串行执行，后续优化
 # agent_builder.add_edge("person_generate", "image_generate")
 agent_builder.add_edge("hourse_generate", "image_generate")
 agent_builder.add_edge("image_generate", END)

@@ -33,6 +33,8 @@ def submit_task(data: SubmitRequest):
     # 检查是否被 interrupt 暂停
     state_snapshot = app_graph.get_state(config)
     
+    # if "__interrupt__" in result:
+
     if state_snapshot.next:  # 如果有下一个节点，说明被暂停了
         # 从 interrupt 值中获取风格列表
         interrupt_value = state_snapshot.tasks[0].interrupts[0].value
